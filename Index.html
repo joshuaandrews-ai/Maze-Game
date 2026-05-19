@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAZE ESCAPE</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: #0f0;
+            font-family: 'Press Start 2P', system-ui;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            image-rendering: pixelated;
+        }
+        
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 0 8px #0f0;
+            background: #111;
+        }
+        
+        canvas {
+            display: block;
+            background: #000;
+            image-rendering: pixelated;
+        }
+        
+        #title-screen, #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            color: #0f0;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 48px;
+            margin: 0 0 30px 0;
+            text-shadow: 0 0 10px #0f0;
+            animation: glow 1s infinite alternate;
+        }
+        
+        button {
+            font-family: 'Press Start 2P', system-ui;
+            font-size: 24px;
+            padding: 15px 40px;
+            background: #000;
+            color: #0f0;
+            border: 4px solid #0f0;
+            cursor: pointer;
+            margin: 15px;
+            box-shadow: 0 0 0 4px #000;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: #0f0;
+            color: #000;
+            box-shadow: 0 0 20px #0f0;
+        }
+        
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border: 3px solid #0f0;
+            font-size: 14px;
+            z-index: 50;
+            min-width: 200px;
+        }
+        
+        #math-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #000;
+            border: 6px solid #0f0;
+            padding: 30px;
+            width: 420px;
+            text-align: center;
+            z-index: 200;
+            display: none;
+            box-shadow: 0 0 30px #0f0;
+        }
+        
+        input {
+            font-family: 'Press Start 2P', system-ui;
+            font-size: 28px;
+            width: 100%;
+            padding: 12px;
+            background: #111;
+            color: #0f0;
+            border: 3px solid #0f0;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        @keyframes glow {
+            from { text-shadow: 0 0 10px #0f0; }
+            to { text-shadow: 0 0 30px #0f0, 0 0 40px #0f0; }
+        }
+        
+        .scanlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 2px,
+                rgba(0, 255, 0, 0.07) 2px,
+                rgba(0, 255, 0, 0.07) 4px
+            );
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="canvas" width="800" height="600"></canvas>
+        
+        <!-- Title Screen -->
+        <div id="title-screen">
+            <h1>MAZE<br>ESCAPE</h1>
+            <p style="margin: 20px 0; font-size: 18px;">FIND THE EXIT</p>
+            <button onclick="startGame()">START GAME</button>
+            <p style="margin-top: 40px; font-size: 14px;">ARROWS / WASD to move</p>
+            <p style="font-size: 14px;">Collect keys • Solve math • Avoid the MONSTER</p>
+        </div>
+        
+        <!-- HUD -->
+        <div id="hud">
+            <div>KEYS: <span id="keys-count">0</span>/5</div>
+            <div>TIME: <span id="time">0</span></div>
+            <div style="margin-top: 8px; font-size: 12px;">ESC to pause</div>
+        </div>
+        
+        <!-- Math Modal -->
+        <div id="math-modal">
+            <h2 style="margin: 0 0 20px 0;">MATH CHALLENGE</h2>
+            <div id="math-question" style="font-size: 32px; margin: 20px 0; min-height: 50px;"></div>
+            <input type="text" id="math-answer" placeholder="ANSWER" autocomplete="off">
+            <button onclick="submitMathAnswer()" style="width: 100%; margin-top: 10px;">SUBMIT</button>
+            <div id="math-feedback" style="margin-top: 15px; font-size: 14px; min-height: 20px;"></div>
+        </div>
+        
+        <!-- Game Over -->
+        <div id="game-over-screen" style="display: none;">
+            <h1 style="color: #f00;">GAME OVER</h1>
+            <p id="game-over-text" style="margin: 20px 0; font-size: 18px;"></p>
+            <button onclick="restartGame()">TRY AGAIN</button>
+            <button onclick="showTitle()">TITLE SCREEN</button>
+        </div>
+        
+        <div class="scanlines"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const TILE_SIZE = 40;
+        const COLS = 20;
+        const ROWS = 15;
+        
+        let grid = [];
+        let player = { x: 1, y: 1, keys: 0 };
+        let monster = { x: 18, y: 13 };
+        let keys = [];
+        let doors = [];
+        let exit = { x: 18, y: 1 };
+        let gameRunning = false;
+        let gameTime = 0;
+        let keysCollected = 0;
+        let totalKeys = 5;
+        let lastTime = 0;
+        let animationFrame;
+        
+        let currentMathKey = null;
+        let mathNum1, mathNum2, mathOp, correctAnswer;
+        
+        const directions = [
+            { dx: 0, dy: -1 },
+            { dx: 1, dy: 0 },
+            { dx: 0, dy: 1 },
+            { dx: -1, dy: 0 }
+        ];
+        
+        function generateMaze() {
+            // Initialize grid with walls
+            grid = Array(ROWS).fill().map(() => Array(COLS).fill(1));
+            
+            // Recursive backtracker maze generation
+            function carve(x, y) {
+                grid[y][x] = 0;
+                const dirs = [...directions].sort(() => Math.random() - 0.5);
+                
+                for (let dir of dirs) {
+                    const nx = x + dir.dx * 2;
+                    const ny = y + dir.dy * 2;
+                    
+                    if (nx > 0 && nx < COLS-1 && ny > 0 && ny < ROWS-1 && grid[ny][nx] === 1) {
+                        grid[y + dir.dy][x + dir.dx] = 0;
+                        carve(nx, ny);
+                    }
+                }
+            }
+            
+            carve(1, 1);
+            
+            // Ensure exit path
+            grid[exit.y][exit.x] = 0;
+            grid[1][18] = 0;
+            
+            // Add some extra paths
+            for (let i = 0; i < 30; i++) {
+                const rx = Math.floor(Math.random() * (COLS-2)) + 1;
+                const ry = Math.floor(Math.random() * (ROWS-2)) + 1;
+                if (grid[ry][rx] === 1) grid[ry][rx] = 0;
+            }
+        }
+        
+        function placeKeysAndDoors() {
+            keys = [];
+            doors = [];
+            
+            const positions = [];
+            
+            // Find valid floor positions
+            for (let y = 1; y < ROWS-1; y++) {
+                for (let x = 1; x < COLS-1; x++) {
+                    if (grid[y][x] === 0 && 
+                        !(x === player.x && y === player.y) && 
+                        !(x === exit.x && y === exit.y) &&
+                        !(x === monster.x && y === monster.y)) {
+                        positions.push({x, y});
+                    }
+                }
+            }
+            
+            // Shuffle positions
+            positions.sort(() => Math.random() - 0.5);
+            
+            // Place keys
+            for (let i = 0; i < totalKeys; i++) {
+                if (positions.length > 0) {
+                    const pos = positions.pop();
+                    keys.push({
+                        x: pos.x,
+                        y: pos.y,
+                        collected: false
+                    });
+                }
+            }
+            
+            // Place doors
+            for (let i = 0; i < totalKeys + 2; i++) {
+                if (positions.length > 0) {
+                    const pos = positions.pop();
+                    // Make sure door is on a path
+                    if (grid[pos.y][pos.x] === 0) {
+                        doors.push({
+                            x: pos.x,
+                            y: pos.y,
+                            locked: true
+                        });
+                        // Mark as door in grid (value 2)
+                        grid[pos.y][pos.x] = 2;
+                    }
+                }
+            }
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    const px = x * TILE_SIZE;
+                    const py = y * TILE_SIZE;
+                    
+                    if (grid[y][x] === 1) {
+                        // Wall
+                        ctx.fillStyle = '#0a0';
+                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        ctx.fillStyle = '#0f0';
+                        ctx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+                    } 
+                    else if (grid[y][x] === 2) {
+                        // Door
+                        ctx.fillStyle = '#840';
+                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        ctx.fillStyle = '#fa0';
+                        ctx.fillRect(px + 8, py + 8, TILE_SIZE - 16, TILE_SIZE - 16);
+                    } 
+                    else {
+                        // Floor
+                        ctx.fillStyle = '#222';
+                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = '#040';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+                    }
+                }
+            }
+            
+            // Draw keys
+            ctx.font = '20px monospace';
+            for (let key of keys) {
+                if (!key.collected) {
+                    const px = key.x * TILE_SIZE + TILE_SIZE/2;
+                    const py = key.y * TILE_SIZE + TILE_SIZE/2;
+                    ctx.fillStyle = '#ff0';
+                    ctx.fillText('🔑', px - 12, py + 8);
+                }
+            }
+            
+            // Draw exit
+            ctx.fillStyle = '#0ff';
+            ctx.fillRect(exit.x * TILE_SIZE + 8, exit.y * TILE_SIZE + 8, TILE_SIZE - 16, TILE_SIZE - 16);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText('🚪', exit.x * TILE_SIZE + 8, exit.y * TILE_SIZE + 30);
+            
+            // Draw player
+            const playerX = player.x * TILE_SIZE + TILE_SIZE/2;
+            const playerY = player.y * TILE_SIZE + TILE_SIZE/2;
+            ctx.fillStyle = '#0f0';
+            ctx.beginPath();
+            ctx.arc(playerX, playerY, TILE_SIZE/2 - 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(playerX - 6, playerY - 8, 12, 6); // eyes
+            
+            // Draw monster
+            const monX = monster.x * TILE_SIZE + TILE_SIZE/2;
+            const monY = monster.y * TILE_SIZE + TILE_SIZE/2;
+            ctx.fillStyle = '#f00';
+            ctx.beginPath();
+            ctx.arc(monX, monY, TILE_SIZE/2 - 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(monX - 8, monY - 6, 6, 8);
+            ctx.fillRect(monX + 2, monY - 6, 6, 8);
+            
+            // HUD update
+            document.getElementById('keys-count').textContent = player.keys;
+        }
+        
+        function movePlayer(dx, dy) {
+            if (!gameRunning) return;
+            
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            
+            if (newX < 0 || newX >= COLS || newY < 0 || newY >= ROWS) return;
+            
+            // Check wall
+            if (grid[newY][newX] === 1) return;
+            
+            // Check door
+            if (grid[newY][newX] === 2) {
+                const door = doors.find(d => d.x === newX && d.y === newY);
+                if (door && door.locked) {
+                    if (player.keys > 0) {
+                        player.keys--;
+                        door.locked = false;
+                        grid[newY][newX] = 0;
+                    } else {
+                        return; // locked, can't pass
+                    }
+                }
+            }
+            
+            player.x = newX;
+            player.y = newY;
+            
+            // Check key pickup
+            for (let i = 0; i < keys.length; i++) {
+                const k = keys[i];
+                if (!k.collected && k.x === player.x && k.y === player.y) {
+                    currentMathKey = k;
+                    showMathQuestion();
+                    return;
+                }
+            }
+            
+            // Check exit
+            if (player.x === exit.x && player.y === exit.y) {
+                winGame();
+            }
+            
+            draw();
+        }
+        
+        function showMathQuestion() {
+            gameRunning = false;
+            
+            const modal = document.getElementById('math-modal');
+            const qEl = document.getElementById('math-question');
+            const ansInput = document.getElementById('math-answer');
+            const feedback = document.getElementById('math-feedback');
+            
+            feedback.textContent = '';
+            ansInput.value = '';
+            
+            // Generate random math problem
+            mathNum1 = Math.floor(Math.random() * 12) + 3;
+            mathNum2 = Math.floor(Math.random() * 12) + 3;
+            const ops = ['+', '-', '×'];
+            mathOp = ops[Math.floor(Math.random() * ops.length)];
+            
+            if (mathOp === '+') {
+                correctAnswer = mathNum1 + mathNum2;
+            } else if (mathOp === '-') {
+                // Ensure positive result
+                if (mathNum2 > mathNum1) [mathNum1, mathNum2] = [mathNum2, mathNum1];
+                correctAnswer = mathNum1 - mathNum2;
+            } else {
+                correctAnswer = mathNum1 * mathNum2;
+            }
+            
+            qEl.textContent = `${mathNum1} ${mathOp} ${mathNum2} = ?`;
+            modal.style.display = 'block';
+            ansInput.focus();
+        }
+        
+        window.submitMathAnswer = function() {
+            const ansInput = document.getElementById('math-answer');
+            const feedback = document.getElementById('math-feedback');
+            const userAnswer = parseInt(ansInput.value);
+            
+            if (isNaN(userAnswer)) {
+                feedback.style.color = '#f66';
+                feedback.textContent = 'ENTER A NUMBER!';
+                return;
+            }
+            
+            if (userAnswer === correctAnswer) {
+                feedback.style.color = '#0f0';
+                feedback.textContent = 'CORRECT!';
+                
+                // Collect key
+                if (currentMathKey) {
+                    currentMathKey.collected = true;
+                    player.keys++;
+                    keysCollected++;
+                }
+                
+                setTimeout(() => {
+                    document.getElementById('math-modal').style.display = 'none';
+                    gameRunning = true;
+                    draw();
+                }, 800);
+            } else {
+                feedback.style.color = '#f66';
+                feedback.textContent = 'WRONG! TRY AGAIN';
+                ansInput.value = '';
+                ansInput.focus();
+            }
+        }
+        
+        function moveMonster() {
+            if (!gameRunning) return;
+            
+            // Simple chase: move closer to player
+            let dx = Math.sign(player.x - monster.x);
+            let dy = Math.sign(player.y - monster.y);
+            
+            // Prefer horizontal or vertical
+            if (Math.random() > 0.5 && dx !== 0) {
+                dy = 0;
+            } else if (dy !== 0) {
+                dx = 0;
+            }
+            
+            let newMX = monster.x + dx;
+            let newMY = monster.y + dy;
+            
+            // Check if valid move
+            if (newMX >= 0 && newMX < COLS && newMY >= 0 && newMY < ROWS && grid[newMY][newMX] !== 1) {
+                // Can move through open doors
+                if (grid[newMY][newMX] === 2) {
+                    const door = doors.find(d => d.x === newMX && d.y === newMY);
+                    if (door && door.locked) {
+                        // Can't go through locked door, try other direction
+                        if (dx !== 0) {
+                            newMX = monster.x;
+                            newMY = monster.y + Math.sign(player.y - monster.y);
+                        } else {
+                            newMX = monster.x + Math.sign(player.x - monster.x);
+                            newMY = monster.y;
+                        }
+                    }
+                }
+                
+                if (newMX >= 0 && newMX < COLS && newMY >= 0 && newMY < ROWS && grid[newMY][newMX] !== 1) {
+                    monster.x = newMX;
+                    monster.y = newMY;
+                }
+            }
+            
+            // Check collision with player
+            if (monster.x === player.x && monster.y === player.y) {
+                catchByMonster();
+            }
+        }
+        
+        function catchByMonster() {
+            gameRunning = false;
+            
+            // Drop keys
+            player.keys = Math.floor(player.keys / 2);
+            
+            // Respawn player
+            player.x = 1;
+            player.y = 1;
+            
+            const goScreen = document.getElementById('game-over-screen');
+            document.getElementById('game-over-text').innerHTML = `CAUGHT BY MONSTER!<br>LOST HALF YOUR KEYS`;
+            goScreen.style.display = 'flex';
+        }
+        
+        function winGame() {
+            gameRunning = false;
+            const goScreen = document.getElementById('game-over-screen');
+            document.getElementById('game-over-text').innerHTML = `YOU ESCAPED!<br>TIME: ${gameTime}s`;
+            document.querySelector('#game-over-screen h1').style.color = '#0f0';
+            document.querySelector('#game-over-screen h1').textContent = 'ESCAPED!';
+            goScreen.style.display = 'flex';
+        }
+        
+        function gameLoop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const delta = timestamp - lastTime;
+            
+            if (delta > 180) { // ~5 moves per second for monster
+                moveMonster();
+                lastTime = timestamp;
+                draw();
+            }
+            
+            animationFrame = requestAnimationFrame(gameLoop);
+        }
+        
+        function startTimer() {
+            setInterval(() => {
+                if (gameRunning) {
+                    gameTime++;
+                    document.getElementById('time').textContent = gameTime;
+                }
+            }, 1000);
+        }
+        
+        window.startGame = function() {
+            document.getElementById('title-screen').style.display = 'none';
+            resetGame();
+        }
+        
+        function resetGame() {
+            player = { x: 1, y: 1, keys: 0 };
+            monster = { x: 18, y: 13 };
+            exit = { x: 18, y: 1 };
+            gameTime = 0;
+            keysCollected = 0;
+            document.getElementById('time').textContent = '0';
+            document.getElementById('keys-count').textContent = '0';
+            document.getElementById('game-over-screen').style.display = 'none';
+            document.querySelector('#game-over-screen h1').style.color = '#f00';
+            document.querySelector('#game-over-screen h1').textContent = 'GAME OVER';
+            
+            generateMaze();
+            placeKeysAndDoors();
+            gameRunning = true;
+            draw();
+        }
+        
+        window.restartGame = function() {
+            resetGame();
+        }
+        
+        window.showTitle = function() {
+            document.getElementById('game-over-screen').style.display = 'none';
+            document.getElementById('title-screen').style.display = 'flex';
+        }
+        
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (!gameRunning) return;
+            
+            switch(e.key) {
+                case 'ArrowUp':
+                case 'w':
+                case 'W':
+                    movePlayer(0, -1);
+                    break;
+                case 'ArrowDown':
+                case 's':
+                case 'S':
+                    movePlayer(0, 1);
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    movePlayer(-1, 0);
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    movePlayer(1, 0);
+                    break;
+                case 'Escape':
+                    // Pause functionality can be expanded
+                    break;
+            }
+        });
+        
+        // Allow enter key in math modal
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const modal = document.getElementById('math-modal');
+                if (modal.style.display === 'block') {
+                    submitMathAnswer();
+                }
+            }
+        });
+        
+        // Initialize game
+        function init() {
+            canvas.width = COLS * TILE_SIZE;
+            canvas.height = ROWS * TILE_SIZE;
+            
+            // Initial draw
+            generateMaze();
+            placeKeysAndDoors();
+            draw();
+            
+            // Start timer
+            startTimer();
+            
+            // Start game loop
+            animationFrame = requestAnimationFrame(gameLoop);
+        }
+        
+        // Boot the game
+        window.onload = init;
+    </script>
+</body>
+</html>
